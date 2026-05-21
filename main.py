@@ -3,6 +3,7 @@ import sys
 import cv2
 import numpy as np
 from insightface.app import FaceAnalysis
+from database import FaceDatabase 
 
 class SuppressOutput:
     def __enter__(self):
@@ -18,12 +19,11 @@ class SuppressOutput:
         sys.stderr = self._stderr
 
 class FaceRecognizer:
-    def __init__(self, register_dir="register"):
-        self.register_dir = register_dir
-        self.registered_embeddings = {}
+    def __init__(self):
         self.reg_names = []
         self.reg_matrix = np.empty((0, 512))
         self.threshold = 0.60 
+        self.db = FaceDatabase()
 
         with SuppressOutput():
             self.app = FaceAnalysis(name='buffalo_s', providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
@@ -39,25 +39,15 @@ class FaceRecognizer:
         return faces[0].embedding
 
     def load_registered_faces(self):
-        self.registered_embeddings.clear()
-        if not os.path.exists(self.register_dir):
-            os.makedirs(self.register_dir, exist_ok=True)
-            
-        files = [f for f in os.listdir(self.register_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-        for file in files:
-            img_path = os.path.join(self.register_dir, file)
-            try:
-                emb = self.get_embedding(img_path)
-                self.registered_embeddings[file] = np.array(emb)
-            except ValueError:
-                print(f"[REJECTED] No face in registration: {file}")
-            except Exception as e:
-                print(f"[ERROR] Registration failed for {file}: {e}")
-
-        if self.registered_embeddings:
-            self.reg_names = list(self.registered_embeddings.keys())
-            raw_matrix = np.array(list(self.registered_embeddings.values()))
+        # Database'deki tüm kullanıcıları yükler
+        # İsimleri ve embeddingleri RAM'e alır
+        self.reg_names, raw_matrix = self.db.load_users()
+        # Eğer kayıtlı kullanıcı varsa embeddingleri normalize edip matrise dönüştürür
+        if len(self.reg_names) > 0:
             self.reg_matrix = raw_matrix / np.linalg.norm(raw_matrix, axis=1, keepdims=True)
+        # Eğer database boşsa boş embedding matrisi oluştur
+        else:
+            self.reg_matrix = np.empty((0, 512))
 
     def verify_in_memory(self, img):
         faces = self.app.get(img)
@@ -93,25 +83,15 @@ class FaceRecognizer:
             print(f"[NO_FACE] {os.path.basename(input_img_path)}")
 
     def register_face(self, img, name):
-        if not name.lower().endswith(('.png', '.jpg', '.jpeg')):
-            filename = f"{name}.jpg"
-        else:
-            filename = name
-        if not os.path.exists(self.register_dir):
-            os.makedirs(self.register_dir, exist_ok=True)
-        path = os.path.join(self.register_dir, filename)
-        cv2.imwrite(path, img)
-        try:
-            emb = self.get_embedding(path)
-            self.registered_embeddings[filename] = np.array(emb)
-            self.reg_names = list(self.registered_embeddings.keys())
-            raw_matrix = np.array(list(self.registered_embeddings.values()))
-            self.reg_matrix = raw_matrix / np.linalg.norm(raw_matrix, axis=1, keepdims=True)
-            return True
-        except Exception as e:
-            if os.path.exists(path):
-                os.remove(path)
-            raise e
+         # Görüntüdeki yüzleri algılar ve ilk yüzün embeddingini alır, ardından database'e kaydeder
+        faces = self.app.get(img)
+        if not faces:
+            raise ValueError("No face detected.")
+        emb = faces[0].embedding
+        self.db.add_user(name, np.array(emb))
+        # Yeni kullanıcı eklendiği için RAM'deki kullanıcı listesini günceller
+        self.load_registered_faces()
+        return True
 
 def listen_serial(recognizer, port="COM3", baudrate=115200):
     import serial
@@ -162,12 +142,15 @@ def listen_serial(recognizer, port="COM3", baudrate=115200):
                     else:
                         status, match_name, dist = recognizer.verify_in_memory(img)
                         if status == "MATCH":
+                            recognizer.db.add_log(match_name, "MATCH", float(dist))
                             ser.write(f"MATCH:{match_name}\n".encode('utf-8'))
                             print(f"MATCH: {match_name} ({dist:.3f})")
                         elif status == "NO_MATCH":
+                            recognizer.db.add_log("UNKNOWN", "NO_MATCH", None)
                             ser.write(b"NO_MATCH\n")
                             print("NO_MATCH")
                         else:
+                            recognizer.db.add_log("NONE", "NO_FACE", None)
                             ser.write(b"NO_FACE\n")
                             print("NO_FACE")
                 except Exception:
