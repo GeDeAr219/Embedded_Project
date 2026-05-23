@@ -65,3 +65,27 @@ class FaceDatabase:
             (user_name, status, distance)
         )
         self.conn.commit()
+    
+    def get_logs(self, limit=50):
+        # Fetch access logs ordered by most recent
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT id, user_name, status, distance, created_at
+            FROM access_logs
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (limit,))
+        return cursor.fetchall()
+
+    def list_users(self):
+        # Return all registered users
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT id, name FROM users ORDER BY id")
+        return cursor.fetchall()
+
+    def delete_user(self, user_id):
+        # Delete a user by ID, returns True if deleted
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
