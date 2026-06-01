@@ -183,3 +183,12 @@ if __name__ == "__main__":
             start_time = time.time()
             recognizer.verify_image(os.path.join(INPUT_DIR, file))
             print(f"Time: {(time.time() - start_time)*1000:.1f}ms")
+     
+        # ── YENİ: WiFi server'ı canlı tut ──────────────────
+        print("[SYS] WiFi server running. Press Ctrl+C to stop.")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("[SYS] Shutting down.")
+        # ────────────────────────────────────────────────────
