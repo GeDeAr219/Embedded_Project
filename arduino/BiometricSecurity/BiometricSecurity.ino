@@ -81,6 +81,7 @@ void handleCamMessage(String msg) {
   }
 }
 
+
 void grantAccess(uint8_t userID) {
   Serial.println("[SYS] ACCESS GRANTED");
   writeLog(userID, 1, REASON_SUCCESS);

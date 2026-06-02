@@ -13,8 +13,8 @@ void oledInit() {
 }
 
 void oledShow(const char* line1,
-              const char* line2 = "",
-              const char* line3 = "") {
+              const char* line2,
+              const char* line3) {
   oled.clearDisplay();
   oled.setCursor(0, 0);  oled.println(line1);
   oled.setCursor(0, 22); oled.println(line2);

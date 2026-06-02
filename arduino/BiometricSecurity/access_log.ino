@@ -12,9 +12,7 @@ struct LogEntry {
   uint8_t  reserved;  // padding (1 byte) → total 8 bytes
 };
 
-#define REASON_FACE_FAIL 0
-#define REASON_FP_FAIL   1
-#define REASON_SUCCESS   2
+
 
 void logInit() {
   if (!rtc.begin()) {
