@@ -4,7 +4,9 @@ import numpy as np
 
 class FaceDatabase:
     def __init__(self, db_path="faces.db"):
-        self.conn = sqlite3.connect(db_path)
+        # check_same_thread=False: the WiFi server handles requests in a
+        # separate thread from where this connection is created.
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.create_tables()
 
     def create_tables(self):

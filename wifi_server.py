@@ -80,20 +80,25 @@ class FaceHandler(BaseHTTPRequestHandler):
             self._send_text(400, "ERROR:DECODE_FAILED")
             return
 
-        status, match_name, dist = _recognizer.verify_in_memory(img)
+        try:
+            status, match_name, dist = _recognizer.verify_in_memory(img)
 
-        if status == "MATCH":
-            _recognizer.db.add_log(match_name, "MATCH", float(dist))
-            self._send_text(200, f"MATCH:{match_name}")
-            print(f"[WiFi] MATCH: {match_name} ({dist:.3f})")
-        elif status == "NO_MATCH":
-            _recognizer.db.add_log("UNKNOWN", "NO_MATCH", None)
-            self._send_text(200, "NO_MATCH")
-            print("[WiFi] NO_MATCH")
-        else:
-            _recognizer.db.add_log("NONE", "NO_FACE", None)
-            self._send_text(200, "NO_FACE")
-            print("[WiFi] NO_FACE")
+            if status == "MATCH":
+                _recognizer.db.add_log(match_name, "MATCH", float(dist))
+                self._send_text(200, f"MATCH:{match_name}")
+                print(f"[WiFi] MATCH: {match_name} ({dist:.3f})")
+            elif status == "NO_MATCH":
+                _recognizer.db.add_log("UNKNOWN", "NO_MATCH", None)
+                self._send_text(200, "NO_MATCH")
+                print("[WiFi] NO_MATCH")
+            else:
+                _recognizer.db.add_log("NONE", "NO_FACE", None)
+                self._send_text(200, "NO_FACE")
+                print("[WiFi] NO_FACE")
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self._send_text(500, f"ERROR:{e}")
 
     def _handle_register(self, img_bytes, name):
         if _recognizer is None:

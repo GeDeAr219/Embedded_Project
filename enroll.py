@@ -1,151 +1,84 @@
-import cv2
+"""
+Enroll a face through the RUNNING face server (main.py).
+
+Registration goes through the live server's /register endpoint, which
+updates the in-memory face list immediately — so you NEVER need to
+restart main.py after enrolling.
+
+The user id is just a number that must match the fingerprint id enrolled
+on the Mega (true same-person 2-factor).
+
+Usage:
+  python enroll.py 1            # capture from ESP32-CAM, register user "1"
+  python enroll.py 1 photo.jpg  # register user "1" from an image file
+  python enroll.py --users      # list registered users
+"""
 import sys
-import numpy as np
+import time
 import urllib.request
-from database import FaceDatabase
-from main import FaceRecognizer
+import urllib.error
 
-# ESP32-CAM's IP address
-ESP32_STREAM_URL = "http://192.168.1.XXX/stream"
+SERVER     = "http://172.20.10.3:5000"     # PC running main.py
+ESP_STREAM = "http://172.20.10.4/stream"   # ESP32-CAM MJPEG stream
 
 
-def enroll_from_esp32(recognizer, name, stream_url=ESP32_STREAM_URL):
-    print(f"[ENROLL] Connecting to ESP32-CAM: {stream_url}")
-    print(f"[ENROLL] Enrolling: '{name}'")
-    print("Press SPACE to capture, ESC to cancel.\n")
+def _post_register(name, jpg_bytes):
+    url = f"{SERVER}/register?name={name}"
+    req = urllib.request.Request(url, data=jpg_bytes,
+                                 headers={"Content-Type": "image/jpeg"})
+    try:
+        return urllib.request.urlopen(req, timeout=20).read().decode("utf-8", "ignore")
+    except urllib.error.HTTPError as ex:
+        return ex.read().decode("utf-8", "ignore")
 
+
+def enroll_from_esp32(name, stream_url=ESP_STREAM, warmup=4.0, max_attempts=40):
+    print(f"[ENROLL] Enrolling '{name}' via {SERVER}")
+    print(f"[ENROLL] Look at the camera. Capturing in {warmup:.0f}s, hold still...")
     stream = urllib.request.urlopen(stream_url, timeout=10)
-    bytes_buffer = b""
-
+    buf = b""
+    t0 = time.time()
+    attempts = 0
     while True:
-        bytes_buffer += stream.read(4096)
-        start = bytes_buffer.find(b'\xff\xd8')
-        end   = bytes_buffer.find(b'\xff\xd9')
-
-        if start != -1 and end != -1:
-            jpg = bytes_buffer[start:end+2]
-            bytes_buffer = bytes_buffer[end+2:]
-
-            nparr = np.frombuffer(jpg, np.uint8)
-            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            if frame is None:
+        buf += stream.read(4096)
+        s = buf.find(b'\xff\xd8')
+        e = buf.find(b'\xff\xd9')
+        if s != -1 and e != -1:
+            jpg = buf[s:e + 2]
+            buf = buf[e + 2:]
+            if time.time() - t0 < warmup:   # give the user time to pose
                 continue
-
-            # live preview
-            preview = frame.copy()
-            cv2.putText(preview, f"Enrolling: {name}", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-            cv2.putText(preview, "SPACE: capture | ESC: cancel", (10, 60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            cv2.imshow("ESP32-CAM Enroll", preview)
-
-            key = cv2.waitKey(1) & 0xFF
-
-            if key == 27:  # ESC
-                print("[ENROLL] Cancelled.")
-                cv2.destroyAllWindows()
+            resp = _post_register(name, jpg)
+            if resp.startswith("REGISTER_OK"):
+                print(f"[ENROLL] Success — {resp}")
+                print("[ENROLL] Server updated live. No restart needed.")
+                return True
+            attempts += 1
+            print(f"[ENROLL] {resp} — retrying ({attempts}/{max_attempts})")
+            if attempts >= max_attempts:
+                print("[ENROLL] Gave up — face the camera and retry.")
                 return False
 
-            if key == 32:  # SPACE
-                try:
-                    recognizer.register_face(frame, name)
-                    print(f"[ENROLL] Successfully enrolled: '{name}'")
-                    cv2.destroyAllWindows()
-                    return True
-                except ValueError as e:
-                    print(f"[ENROLL] No face detected, try again: {e}")
+
+def enroll_from_image(name, path):
+    with open(path, "rb") as f:
+        jpg = f.read()
+    resp = _post_register(name, jpg)
+    print(f"[ENROLL] {resp}")
+    return resp.startswith("REGISTER_OK")
 
 
-def enroll_from_image(recognizer, name, img_path):
-    img = cv2.imread(img_path)
-    if img is None:
-        print(f"[ERROR] Cannot read image: {img_path}")
-        return False
-    try:
-        recognizer.register_face(img, name)
-        print(f"[ENROLL] Enrolled '{name}' from {img_path}")
-        return True
-    except ValueError as e:
-        print(f"[ENROLL] Failed: {e}")
-        return False
-
-
-def list_users(db):
-    users = db.list_users()
-    if not users:
-        print("No users registered.")
-        return
-    print("\n---- Registered Users ----")
-    for uid, name in users:
-        print(f"  ID {uid:3d} | {name}")
-    print(f"  Total: {len(users)}\n")
-
-
-def delete_user(db):
-    list_users(db)
-    try:
-        uid = int(input("Enter user ID to delete (0 to cancel): "))
-        if uid == 0:
-            return
-        if db.delete_user(uid):
-            print(f"[DELETE] User {uid} removed.")
-        else:
-            print(f"[DELETE] ID {uid} not found.")
-    except ValueError:
-        print("[ERROR] Invalid input.")
-
-
-def interactive_menu(recognizer):
-    db = recognizer.db
-    stream_url = ESP32_STREAM_URL
-
-    while True:
-        print("\n==== ADMIN ENROLLMENT MENU ====")
-        print(f"  ESP32-CAM: {stream_url}")
-        print("  1. Enroll from ESP32-CAM")
-        print("  2. Enroll from image file")
-        print("  3. List registered users")
-        print("  4. Delete a user")
-        print("  5. Change ESP32-CAM IP")
-        print("  6. Exit")
-        print("================================")
-        choice = input("Select: ").strip()
-
-        if choice == "1":
-            name = input("Enter name: ").strip()
-            if name:
-                enroll_from_esp32(recognizer, name, stream_url)
-        elif choice == "2":
-            name = input("Enter name: ").strip()
-            path = input("Image path: ").strip()
-            if name and path:
-                enroll_from_image(recognizer, name, path)
-        elif choice == "3":
-            list_users(db)
-        elif choice == "4":
-            delete_user(db)
-        elif choice == "5":
-            ip = input("Enter ESP32-CAM IP (e.g. 192.168.1.42): ").strip()
-            stream_url = f"http://{ip}/stream"
-            print(f"Updated: {stream_url}")
-        elif choice == "6":
-            break
-        else:
-            print("Invalid choice.")
+def list_users():
+    data = urllib.request.urlopen(f"{SERVER}/users", timeout=10).read().decode("utf-8", "ignore")
+    print("---- Registered users ----")
+    print(data if data.strip() else "(empty)")
 
 
 if __name__ == "__main__":
-    recognizer = FaceRecognizer()
-    recognizer.load_registered_faces()
-
-    # python enroll.py "Emirhan"         → direct camera enroll
-    if len(sys.argv) == 2:
-        enroll_from_esp32(recognizer, sys.argv[1])
-
-    # python enroll.py "Emirhan" photo.jpg  → enroll from image
-    elif len(sys.argv) == 3:
-        enroll_from_image(recognizer, sys.argv[1], sys.argv[2])
-
-    # python enroll.py                   → interactive menu
+    args = sys.argv[1:]
+    if not args or args[0] in ("--users", "-u"):
+        list_users()
+    elif len(args) == 1:
+        enroll_from_esp32(args[0])
     else:
-        interactive_menu(recognizer)
+        enroll_from_image(args[0], args[1])
