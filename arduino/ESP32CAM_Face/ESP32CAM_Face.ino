@@ -38,11 +38,11 @@
 #include "esp_http_server.h"
 
 // ── EDIT THESE ───────────────────────────────────────────────
-const char* WIFI_SSID = "iPhone";
-const char* WIFI_PASS = "ggasa2131";
+const char* WIFI_SSID = "Emir";
+const char* WIFI_PASS = "emir5353";
 // PC running main.py / wifi_server.py (port 5000):
-const char* SERVER_CHECK_URL    = "http://172.20.10.3:5000/check";
-const char* SERVER_REGISTER_URL = "http://172.20.10.3:5000/register?name=";
+const char* SERVER_CHECK_URL    = "http://172.20.10.2:8080/check";
+const char* SERVER_REGISTER_URL = "http://172.20.10.2:8080/register?name=";
 // ─────────────────────────────────────────────────────────────
 
 // UART to Arduino Mega (UART1 remapped to free pins)
@@ -323,6 +323,9 @@ void loop() {
         doFaceRegister(id);
       }
       cmd = "";
+    } else if (cmd == "PING") {   // ← doğru yer: \n geldiğinde, cmd="" öncesi
+        MegaSerial.println("PONG");
+        Serial.println("[UART] PING -> PONG");
     } else if (c != '\r') {
       cmd += c;
     }

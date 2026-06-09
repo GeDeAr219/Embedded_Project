@@ -18,8 +18,8 @@ import time
 import urllib.request
 import urllib.error
 
-SERVER     = "http://172.20.10.3:5000"     # PC running main.py
-ESP_STREAM = "http://172.20.10.4/stream"   # ESP32-CAM MJPEG stream
+SERVER     = "http://172.20.10.2:8080"     # PC running main.py
+ESP_STREAM = "http://172.20.10.3/stream"   # ESP32-CAM MJPEG stream
 
 
 def _post_register(name, jpg_bytes):

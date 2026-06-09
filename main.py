@@ -93,6 +93,8 @@ class FaceRecognizer:
         self.load_registered_faces()
         return True
 
+
+
 def listen_serial(recognizer, port="COM3", baudrate=115200):
     import serial
     try:
@@ -169,7 +171,7 @@ if __name__ == "__main__":
     recognizer.load_registered_faces()
 
     from wifi_server import start_wifi_server
-    start_wifi_server(recognizer, port=5000)
+    start_wifi_server(recognizer, port=8080)
     
     if mode == "serial":
         port = sys.argv[2] if len(sys.argv) > 2 else "COM3"

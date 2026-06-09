@@ -8,8 +8,8 @@ Usage:  python test_check.py
 """
 import urllib.request
 
-ESP_CAPTURE = "http://172.20.10.4/capture"      # ESP32-CAM single still
-SERVER_CHECK = "http://172.20.10.3:5000/check"  # PC face server
+ESP_CAPTURE = "http://172.20.10.3/capture"      # ESP32-CAM single still
+SERVER_CHECK = "http://172.20.10.2:8080/check"  # PC face server
 
 print(f"[TEST] Grabbing frame from {ESP_CAPTURE} ...")
 img = urllib.request.urlopen(ESP_CAPTURE, timeout=10).read()

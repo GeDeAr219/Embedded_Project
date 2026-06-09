@@ -25,6 +25,7 @@
 #define BTN_ENROLL    43
 #define BTN_SILENCE   44
 #define BTN_CANCEL    45
+#define BTN_RESET_DB  46
 #define BUZZER_PIN    26
 #define RELAY_PIN     40
 #define LED_GREEN     30
@@ -87,6 +88,7 @@ void setup() {
   pinMode(BTN_ENROLL,  INPUT_PULLUP);
   pinMode(BTN_SILENCE, INPUT_PULLUP);
   pinMode(BTN_CANCEL,  INPUT_PULLUP);
+  pinMode(BTN_RESET_DB, INPUT_PULLUP);
   pinMode(BUZZER_PIN,  OUTPUT);
   pinMode(RELAY_PIN,   OUTPUT);
   pinMode(LED_GREEN,   OUTPUT);
@@ -148,6 +150,34 @@ void loop() {
       while (digitalRead(BTN_SILENCE) == LOW) { delay(10); }
     }
   }
+  if (digitalRead(BTN_RESET_DB) == LOW) {
+    delay(50);
+    if (digitalRead(BTN_RESET_DB) == LOW) {
+        oledShow("Hold 3s to", "reset database...");
+        unsigned long t = millis();
+        while (digitalRead(BTN_RESET_DB) == LOW) {
+            if (millis() - t > 3000) {
+                // 3 saniye basılı tutulursa sıfırla
+                CAM_SERIAL.println("RESET_DB");
+                oledShow("DB Resetting...", "Please wait...");
+                delay(2000);
+                oledShow("DB Reset!", "Done.");
+                delay(2000);
+                showWelcome();
+                break;
+            }
+        }
+        // 3 saniyeden önce bırakılırsa iptal
+        if (millis() - t < 3000) {
+            oledShow("Cancelled.");
+            delay(1000);
+            showWelcome();
+        }
+        while (digitalRead(BTN_RESET_DB) == LOW) { delay(10); }
+    }
+  }
+
+
 }
 
 // ── Helpers ──────────────────────────────────────────────────
