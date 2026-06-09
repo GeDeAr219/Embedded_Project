@@ -65,9 +65,6 @@ class FaceHandler(BaseHTTPRequestHandler):
                 name = self.path.split("name=")[1].split("&")[0]
             self._handle_register(body, name)
 
-        elif self.path == "/reset":
-            self._handle_reset()
-
         else:
             self._send_text(404, "NOT_FOUND")
 
@@ -122,18 +119,6 @@ class FaceHandler(BaseHTTPRequestHandler):
             _recognizer.register_face(img, name)
             self._send_text(200, f"REGISTER_OK:{name}")
             print(f"[WiFi] REGISTER_OK: {name}")
-        except Exception as e:
-            self._send_text(500, f"ERROR:{e}")
-
-    def _handle_reset(self):
-        if _recognizer is None:
-            self._send_text(500, "ERROR:NOT_READY")
-            return
-        try:
-            _recognizer.db.reset_database()
-            _recognizer.load_registered_faces()
-            self._send_text(200, "RESET_OK")
-            print("[WiFi] Database reset successful")
         except Exception as e:
             self._send_text(500, f"ERROR:{e}")
 

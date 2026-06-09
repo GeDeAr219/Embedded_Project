@@ -91,12 +91,3 @@ class FaceDatabase:
         cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
         self.conn.commit()
         return cursor.rowcount > 0
-
-    def reset_database(self):
-        # Clear both users and access logs, and reset autoincrement ids
-        cursor = self.conn.cursor()
-        cursor.execute("DELETE FROM users")
-        cursor.execute("DELETE FROM sqlite_sequence WHERE name='users'")
-        cursor.execute("DELETE FROM access_logs")
-        cursor.execute("DELETE FROM sqlite_sequence WHERE name='access_logs'")
-        self.conn.commit()

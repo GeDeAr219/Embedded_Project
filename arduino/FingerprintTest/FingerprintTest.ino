@@ -155,42 +155,20 @@ void loop() {
     if (digitalRead(BTN_RESET_DB) == LOW) {
         oledShow("Hold 3s to", "reset database...");
         unsigned long t = millis();
-        bool triggered = false;
         while (digitalRead(BTN_RESET_DB) == LOW) {
             if (millis() - t > 3000) {
-                triggered = true;
+                // 3 saniye basılı tutulursa sıfırla
+                CAM_SERIAL.println("RESET_DB");
+                oledShow("DB Resetting...", "Please wait...");
+                delay(2000);
+                oledShow("DB Reset!", "Done.");
+                delay(2000);
+                showWelcome();
                 break;
             }
-            delay(10);
         }
-        if (triggered) {
-            oledShow("DB Resetting...", "1/2 Clearing finger");
-            Serial.println(F("\n>> RESET DATABASE"));
-            
-            // Step 1: Clear local fingerprint sensor database
-            uint8_t f_res = finger.emptyDatabase();
-            if (f_res == FINGERPRINT_OK) {
-                Serial.println(F("  [FINGER] Cleared fingerprint DB."));
-                oledShow("DB Resetting...", "2/2 Clearing face DB");
-            } else {
-                Serial.print(F("  [FINGER] Clear failed: ")); Serial.println(f_res);
-                oledShow("DB Resetting...", "Finger clear fail", "Clearing face DB...");
-            }
-            finger.getTemplateCount(); // Update template count to 0
-            delay(1000);
-
-            // Step 2: Clear remote face database on PC server via ESP32-CAM
-            if (requestFaceReset()) {
-                oledShow("DB Reset!", "Done.");
-                Serial.println(F("  [SYS] Database reset complete."));
-            } else {
-                oledShow("Reset Error!", "Face DB clear failed");
-                Serial.println(F("  [SYS] Face database reset failed."));
-            }
-            delay(2500);
-            showWelcome();
-        } else {
-            // Cancelled if released before 3s
+        // 3 saniyeden önce bırakılırsa iptal
+        if (millis() - t < 3000) {
             oledShow("Cancelled.");
             delay(1000);
             showWelcome();
@@ -310,32 +288,6 @@ FaceRegResult requestFaceRegister(int id) {
     }
   }
   return FREG_ERR;  // timeout
-}
-
-// Ask the ESP32-CAM to trigger a face database reset on the PC server.
-// Returns true on success, false on failure/cancel/timeout.
-bool requestFaceReset() {
-  while (CAM_SERIAL.available()) CAM_SERIAL.read();  // flush stale bytes
-  CAM_SERIAL.println("RESET_DB");
-  Serial.println(F("  [CAM] RESET_DB sent, waiting..."));
-
-  String resp = "";
-  unsigned long t0 = millis();
-  while (millis() - t0 < 15000) {  // 15 seconds timeout
-    if (digitalRead(BTN_CANCEL) == LOW) return false;
-    while (CAM_SERIAL.available()) {
-      char c = CAM_SERIAL.read();
-      if (c == '\n') {
-        resp.trim();
-        Serial.print(F("  [CAM] -> ")); Serial.println(resp);
-        if (resp == "RESET_OK") return true;
-        return false;
-      } else if (c != '\r') {
-        resp += c;
-      }
-    }
-  }
-  return false; // timeout
 }
 
 // ── LOGIN (face first, then fingerprint) ─────────────────────

@@ -41,11 +41,10 @@
 const char* WIFI_SSID = "Emir";
 const char* WIFI_PASS = "emir5353";
 // PC running main.py / wifi_server.py (port 5000):
-const char* SERVER_CHECK_URL    = "http://172.20.10.4:8080/check";
-const char* SERVER_REGISTER_URL = "http://172.20.10.4:8080/register?name=";
-const char* SERVER_RESET_URL    = "http://172.20.10.4:8080/reset";
+const char* SERVER_CHECK_URL    = "http://172.20.10.2:8080/check";
+const char* SERVER_REGISTER_URL = "http://172.20.10.2:8080/register?name=";
 // ─────────────────────────────────────────────────────────────
-//asdasdas
+
 // UART to Arduino Mega (UART1 remapped to free pins)
 #define UART_RX_PIN   13   // <- Mega TX2 (pin16) via level shifter
 #define UART_TX_PIN   14   // -> Mega RX2 (pin17)
@@ -207,31 +206,6 @@ void doFaceRegister(const String& id) {
   Serial.println("[REG] gave up -> REG_FAIL");
 }
 
-// ── Wipe both face database on the PC server ─────────────────
-void doDatabaseReset() {
-  if (WiFi.status() != WL_CONNECTED) {
-    MegaSerial.println("RESET_FAIL");
-    Serial.println("[RESET] WiFi down -> RESET_FAIL");
-    return;
-  }
-
-  HTTPClient http;
-  http.begin(SERVER_RESET_URL);
-  http.addHeader("Content-Type", "text/plain");
-  http.setTimeout(10000);
-  int code = http.POST("");
-  String payload = (code > 0) ? http.getString() : "";
-  http.end();
-
-  Serial.printf("[RESET] HTTP %d  payload='%s'\n", code, payload.c_str());
-
-  if (code == 200 && payload.startsWith("RESET_OK")) {
-    MegaSerial.println("RESET_OK");
-  } else {
-    MegaSerial.println("RESET_FAIL");
-  }
-}
-
 // ── HTTP: single still at /capture ───────────────────────────
 static esp_err_t capture_handler(httpd_req_t* req) {
   camera_fb_t* fb = esp_camera_fb_get();
@@ -347,9 +321,6 @@ void loop() {
         id.trim();
         Serial.print("[UART] REGISTER received for id "); Serial.println(id);
         doFaceRegister(id);
-      } else if (cmd == "RESET_DB") {
-        Serial.println("[UART] RESET_DB received");
-        doDatabaseReset();
       }
       cmd = "";
     } else if (cmd == "PING") {   // ← doğru yer: \n geldiğinde, cmd="" öncesi
