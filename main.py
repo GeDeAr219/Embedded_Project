@@ -171,7 +171,7 @@ if __name__ == "__main__":
     recognizer.load_registered_faces()
 
     from wifi_server import start_wifi_server
-    start_wifi_server(recognizer, port=8080)
+    start_wifi_server(recognizer, port=5000)
     
     if mode == "serial":
         port = sys.argv[2] if len(sys.argv) > 2 else "COM3"

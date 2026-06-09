@@ -18,7 +18,7 @@ import time
 import urllib.request
 import urllib.error
 
-SERVER     = "http://172.20.10.2:8080"     # PC running main.py
+SERVER     = "http://172.20.10.4:5000"     # PC running main.py
 ESP_STREAM = "http://172.20.10.3/stream"   # ESP32-CAM MJPEG stream
 
 
