@@ -68,6 +68,9 @@ class FaceHandler(BaseHTTPRequestHandler):
         elif self.path == "/reset":
             self._handle_reset()
 
+        elif self.path == "/log":
+            self._handle_log(body)
+
         else:
             self._send_text(404, "NOT_FOUND")
 
@@ -84,18 +87,17 @@ class FaceHandler(BaseHTTPRequestHandler):
             return
 
         try:
+            # NOTE: /check no longer writes to the log. The Mega logs the
+            # final outcome via /log using the DS3231 (RTC) timestamp.
             status, match_name, dist = _recognizer.verify_in_memory(img)
 
             if status == "MATCH":
-                _recognizer.db.add_log(match_name, "MATCH", float(dist))
                 self._send_text(200, f"MATCH:{match_name}")
                 print(f"[WiFi] MATCH: {match_name} ({dist:.3f})")
             elif status == "NO_MATCH":
-                _recognizer.db.add_log("UNKNOWN", "NO_MATCH", None)
                 self._send_text(200, "NO_MATCH")
                 print("[WiFi] NO_MATCH")
             else:
-                _recognizer.db.add_log("NONE", "NO_FACE", None)
                 self._send_text(200, "NO_FACE")
                 print("[WiFi] NO_FACE")
         except Exception as e:
@@ -135,6 +137,28 @@ class FaceHandler(BaseHTTPRequestHandler):
             self._send_text(200, "RESET_OK")
             print("[WiFi] Database reset successful")
         except Exception as e:
+            self._send_text(500, f"ERROR:{e}")
+
+    def _handle_log(self, body):
+        # Body from the Mega (via ESP): "2026-06-14 14:32:05|EVENT|userid"
+        # The timestamp comes from the Mega's DS3231 RTC, not the PC clock.
+        if _recognizer is None:
+            self._send_text(500, "ERROR:NOT_READY")
+            return
+        try:
+            text = body.decode("utf-8", "ignore").strip()
+            parts = text.split("|")
+            if len(parts) < 3:
+                self._send_text(400, "ERROR:BAD_LOG")
+                return
+            ts, event, user_id = parts[0], parts[1], parts[2]
+            user = user_id if user_id not in ("0", "") else "UNKNOWN"
+            _recognizer.db.add_log_with_time(user, event, ts)
+            self._send_text(200, "LOG_OK")
+            print(f"[WiFi] LOG {ts} {event} id={user_id}")
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
             self._send_text(500, f"ERROR:{e}")
 
     def _send_text(self, code, text):

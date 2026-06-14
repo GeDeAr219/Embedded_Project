@@ -44,6 +44,7 @@ const char* WIFI_PASS = "emir5353";
 const char* SERVER_CHECK_URL    = "http://172.20.10.4:5000/check";
 const char* SERVER_REGISTER_URL = "http://172.20.10.4:5000/register?name=";
 const char* SERVER_RESET_URL    = "http://172.20.10.4:5000/reset";
+const char* SERVER_LOG_URL      = "http://172.20.10.4:5000/log";
 // ─────────────────────────────────────────────────────────────
 
 // UART to Arduino Mega (UART1 remapped to free pins)
@@ -232,6 +233,23 @@ void doDatabaseReset() {
   }
 }
 
+// ── Forward a Mega access-log line to the PC database ────────
+// data is "2026-06-14 14:32:05|GRANTED|1" (RTC time | event | id).
+// Fire-and-forget: the Mega does not wait for a reply.
+void doLog(const String& data) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[LOG] WiFi down -> dropped");
+    return;
+  }
+  HTTPClient http;
+  http.begin(SERVER_LOG_URL);
+  http.addHeader("Content-Type", "text/plain");
+  http.setTimeout(6000);
+  int code = http.POST(data);
+  http.end();
+  Serial.printf("[LOG] POST '%s' -> HTTP %d\n", data.c_str(), code);
+}
+
 // ── HTTP: single still at /capture ───────────────────────────
 static esp_err_t capture_handler(httpd_req_t* req) {
   camera_fb_t* fb = esp_camera_fb_get();
@@ -350,6 +368,9 @@ void loop() {
       } else if (cmd == "RESET_DB") {
         Serial.println("[UART] RESET_DB received");
         doDatabaseReset();
+      } else if (cmd.startsWith("LOG|")) {   // "LOG|<ts>|<event>|<id>"
+        Serial.print("[UART] LOG received: "); Serial.println(cmd);
+        doLog(cmd.substring(4));
       }
       cmd = "";
     } else if (cmd == "PING") {   // ← doğru yer: \n geldiğinde, cmd="" öncesi

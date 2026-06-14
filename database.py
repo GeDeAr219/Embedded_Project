@@ -60,11 +60,14 @@ class FaceDatabase:
 
         return names, np.array(embeddings)
 
-    def add_log(self, user_name, status, distance=None):
+    def add_log_with_time(self, user_name, status, created_at, distance=None):
+        # Log an event with an explicit timestamp (from the Mega's DS3231 RTC)
+        # instead of the PC clock.
         cursor = self.conn.cursor()
         cursor.execute(
-            "INSERT INTO access_logs (user_name, status, distance) VALUES (?, ?, ?)",
-            (user_name, status, distance)
+            "INSERT INTO access_logs (user_name, status, distance, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (user_name, status, distance, created_at)
         )
         self.conn.commit()
     
@@ -84,13 +87,6 @@ class FaceDatabase:
         cursor = self.conn.cursor()
         cursor.execute("SELECT id, name FROM users ORDER BY id")
         return cursor.fetchall()
-
-    def delete_user(self, user_id):
-        # Delete a user by ID, returns True if deleted
-        cursor = self.conn.cursor()
-        cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        self.conn.commit()
-        return cursor.rowcount > 0
 
     def reset_database(self):
         # Clear both users and access logs, and reset autoincrement ids

@@ -19,6 +19,7 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <RTClib.h>          // DS3231 real-time clock
 
 #define FINGER_BAUD   57600
 #define BTN_LOGIN     42
@@ -30,6 +31,7 @@
 #define RELAY_PIN     40
 #define LED_GREEN     30
 #define LED_RED       28
+#define LED_PROCESS   32   // ON while a login/enroll is in progress
 
 #define SCREEN_WIDTH  128
 #define SCREEN_HEIGHT 64
@@ -48,8 +50,10 @@ enum FaceRegResult { FREG_OK, FREG_FAIL, FREG_ERR, FREG_CANCEL };
 
 Adafruit_Fingerprint finger = Adafruit_Fingerprint(&Serial1);
 Adafruit_SSD1306 oled(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+RTC_DS3231 rtc;
 
 bool alarmActive = false;
+bool rtcOk = false;       // true if the DS3231 was found
 
 // ── OLED helpers ─────────────────────────────────────────────
 
@@ -73,14 +77,52 @@ void oledShowLarge(const char* text) {
   oled.display();
 }
 
+// ── RTC time helpers ─────────────────────────────────────────
+
+// Full timestamp for logging: "2026-06-14 14:32:05"
+void getDateTime(char* buf, size_t n) {
+  if (!rtcOk) { snprintf(buf, n, "0000-00-00 00:00:00"); return; }
+  DateTime now = rtc.now();
+  snprintf(buf, n, "%04d-%02d-%02d %02d:%02d:%02d",
+           now.year(), now.month(), now.day(),
+           now.hour(), now.minute(), now.second());
+}
+
+// Short clock for the OLED: "14:32"
+void getClock(char* buf, size_t n) {
+  if (!rtcOk) { snprintf(buf, n, "--:--"); return; }
+  DateTime now = rtc.now();
+  snprintf(buf, n, "%02d:%02d", now.hour(), now.minute());
+}
+
+// Send an access event to the PC database (via the ESP32-CAM) stamped
+// with the DS3231 time:  "LOG|2026-06-14 14:32:05|GRANTED|1"
+void sendLog(const char* event, int userId) {
+  char ts[24];
+  getDateTime(ts, sizeof(ts));
+  CAM_SERIAL.print("LOG|");
+  CAM_SERIAL.print(ts);
+  CAM_SERIAL.print('|');
+  CAM_SERIAL.print(event);
+  CAM_SERIAL.print('|');
+  CAM_SERIAL.println(userId);
+  Serial.print(F("  [LOG] ")); Serial.print(ts);
+  Serial.print(F(" ")); Serial.print(event);
+  Serial.print(F(" id=")); Serial.println(userId);
+}
+
 void showWelcome() {
   oled.clearDisplay();
   oled.setTextSize(1);
   oled.setTextColor(SSD1306_WHITE);
   
-  // Header
-  oled.setCursor(16, 0);
-  oled.println(F("BIOMETRIC ACCESS"));
+  // Header: title + live clock
+  oled.setCursor(2, 0);
+  oled.print(F("BIOMETRIC"));
+  char clk[8];
+  getClock(clk, sizeof(clk));
+  oled.setCursor(92, 0);
+  oled.println(clk);
   oled.drawFastHLine(0, 9, 128, SSD1306_WHITE);
   
   // Grid of 5 buttons
@@ -117,14 +159,26 @@ void setup() {
   pinMode(RELAY_PIN,   OUTPUT);
   pinMode(LED_GREEN,   OUTPUT);
   pinMode(LED_RED,     OUTPUT);
+  pinMode(LED_PROCESS, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
   digitalWrite(RELAY_PIN,  HIGH);  // HIGH = locked (active-LOW relay)
   digitalWrite(LED_GREEN,  LOW);
   digitalWrite(LED_RED,    LOW);
+  digitalWrite(LED_PROCESS, LOW);
 
   oled.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
   oled.clearDisplay();
   oled.display();
+
+  // ── RTC (DS3231) ──
+  rtcOk = rtc.begin();
+  if (!rtcOk) {
+    Serial.println(F("[RTC] DS3231 not found!"));
+  } else if (rtc.lostPower()) {
+    // Set the clock to this sketch's compile time once after a battery loss.
+    Serial.println(F("[RTC] lost power -> setting to compile time."));
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  }
 
   finger.begin(FINGER_BAUD);
   delay(100);
@@ -148,7 +202,9 @@ void loop() {
   if (digitalRead(BTN_LOGIN) == LOW) {
     delay(50);
     if (digitalRead(BTN_LOGIN) == LOW) {
+      digitalWrite(LED_PROCESS, HIGH);   // busy
       searchFlow();
+      digitalWrite(LED_PROCESS, LOW);
       while (digitalRead(BTN_LOGIN) == LOW) { delay(10); }
     }
   }
@@ -156,7 +212,9 @@ void loop() {
   if (digitalRead(BTN_ENROLL) == LOW) {
     delay(50);
     if (digitalRead(BTN_ENROLL) == LOW) {
+      digitalWrite(LED_PROCESS, HIGH);   // busy
       enrollFlow();
+      digitalWrite(LED_PROCESS, LOW);
       while (digitalRead(BTN_ENROLL) == LOW) { delay(10); }
     }
   }
@@ -232,7 +290,12 @@ void loop() {
     }
   }
 
-
+  // Keep the welcome-screen clock current (refresh while idle).
+  static unsigned long lastClock = 0;
+  if (!alarmActive && millis() - lastClock > 20000) {
+    lastClock = millis();
+    showWelcome();
+  }
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -258,24 +321,34 @@ void returnToWelcome(const char* msg, unsigned int ms = 2000) {
 }
 
 // Raise the alarm: buzzer + red LED stay on until button 44.
-void triggerAlarm(const char* title) {
+// Shows the alarm time on the OLED and logs it with the RTC timestamp.
+void triggerAlarm(const char* title, int userId = 0) {
+  char clk[8];  getClock(clk, sizeof(clk));
+  char line[22]; snprintf(line, sizeof(line), "ALARM  %s", clk);
   alarmActive = true;
   digitalWrite(BUZZER_PIN, HIGH);
   digitalWrite(LED_RED,    HIGH);
+  digitalWrite(LED_PROCESS, LOW);   // blue off so red shows clean
   Serial.print(F("[ALARM] ")); Serial.println(title);
-  oledShow(title, "ALARM ACTIVE", "Press 44 to silence.");
+  oledShow(title, line, "Press 44 to silence.");
+  sendLog(title, userId);           // log alarm reason + RTC time
 }
 
 // Open the door for 3s on a successful 2-factor login.
-void grantAccess(const char* info) {
-  Serial.print(F("  [GRANTED] ")); Serial.println(info);
+// Shows the user id + login time and logs it.
+void grantAccess(int userId) {
+  char clk[8];  getClock(clk, sizeof(clk));
+  char line[22]; snprintf(line, sizeof(line), "ID:%d   %s", userId, clk);
+  Serial.print(F("  [GRANTED] ")); Serial.println(line);
   digitalWrite(RELAY_PIN, LOW);   // LOW = unlocked
   digitalWrite(LED_GREEN, HIGH);
-  oledShow("Access Granted!", info, "Door unlocked...");
+  digitalWrite(LED_PROCESS, LOW);   // blue off so green shows clean
+  oledShow("Access Granted!", line, "Door unlocked...");
+  sendLog("GRANTED", userId);
   delay(3000);
   digitalWrite(RELAY_PIN, HIGH);  // HIGH = locked
   digitalWrite(LED_GREEN, LOW);
-  oledShow("Door locked.", info);
+  oledShow("Door locked.", line);
   delay(1500);
   showWelcome();
 }
@@ -406,17 +479,15 @@ void searchFlow() {
   int p = finger.fingerSearch();
   if (p == FINGERPRINT_OK) {
     if ((int)finger.fingerID == faceID) {
-      char buf[24];
-      sprintf(buf, "User ID:%d OK", faceID);
-      grantAccess(buf);                 // face & finger are the same person
+      grantAccess(faceID);              // face & finger are the same person
     } else {
       char buf[40];
       sprintf(buf, "Face:%d Finger:%d", faceID, finger.fingerID);
       Serial.print(F("  [DENIED] mismatch -> ")); Serial.println(buf);
-      triggerAlarm("ID MISMATCH!");     // different people -> alarm
+      triggerAlarm("ID MISMATCH!", faceID);   // different people -> alarm
     }
   } else if (p == FINGERPRINT_NOTFOUND) {
-    triggerAlarm("UNKNOWN USER!");
+    triggerAlarm("UNKNOWN USER!", faceID);
   } else {
     returnToWelcome("Search error. Try again.");
   }
@@ -488,10 +559,11 @@ void enrollFlow() {
   }
 
   if (finger.storeModel(id) == FINGERPRINT_OK) {
-    char idStr[24];
-    sprintf(idStr, "Registered to ID %d", id);
-    Serial.println(idStr);
+    char clk[8];  getClock(clk, sizeof(clk));
+    char idStr[24]; snprintf(idStr, sizeof(idStr), "ID %d  at %s", id, clk);
+    Serial.print(F("Registered ")); Serial.println(idStr);
     oledShow("Registered!", idStr);
+    sendLog("REGISTER", id);
     delay(2500);
     showWelcome();
   } else {
