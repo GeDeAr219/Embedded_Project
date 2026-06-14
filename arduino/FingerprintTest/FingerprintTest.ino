@@ -74,7 +74,31 @@ void oledShowLarge(const char* text) {
 }
 
 void showWelcome() {
-  oledShow("Welcome!", "42:Login  43:Enroll", "44:Silence 45:Cancel");
+  oled.clearDisplay();
+  oled.setTextSize(1);
+  oled.setTextColor(SSD1306_WHITE);
+  
+  // Header
+  oled.setCursor(16, 0);
+  oled.println(F("BIOMETRIC ACCESS"));
+  oled.drawFastHLine(0, 9, 128, SSD1306_WHITE);
+  
+  // Grid of 5 buttons
+  oled.setCursor(0, 14);  oled.println(F("1:Login"));
+  oled.setCursor(0, 26);  oled.println(F("3:Silence"));
+  oled.setCursor(0, 38);  oled.println(F("5:Reset DB"));
+  
+  oled.setCursor(68, 14); oled.println(F("2:Enroll"));
+  oled.setCursor(68, 26); oled.println(F("4:Cancel"));
+  
+  // Footer: template count
+  oled.drawFastHLine(0, 51, 128, SSD1306_WHITE);
+  oled.setCursor(10, 55);
+  char countBuf[24];
+  sprintf(countBuf, "Templates: %d", finger.templateCount);
+  oled.println(countBuf);
+  
+  oled.display();
 }
 
 // ── Setup / Loop ─────────────────────────────────────────────
@@ -150,25 +174,56 @@ void loop() {
       while (digitalRead(BTN_SILENCE) == LOW) { delay(10); }
     }
   }
-  if (digitalRead(BTN_RESET_DB) == LOW) {
+    if (digitalRead(BTN_RESET_DB) == LOW) {
     delay(50);
     if (digitalRead(BTN_RESET_DB) == LOW) {
-        oledShow("Hold 3s to", "reset database...");
+        oledShow("Hold Button 5", "for 3 seconds to", "reset database...");
         unsigned long t = millis();
+        bool triggered = false;
         while (digitalRead(BTN_RESET_DB) == LOW) {
             if (millis() - t > 3000) {
-                // 3 saniye basılı tutulursa sıfırla
-                CAM_SERIAL.println("RESET_DB");
-                oledShow("DB Resetting...", "Please wait...");
-                delay(2000);
-                oledShow("DB Reset!", "Done.");
-                delay(2000);
-                showWelcome();
+                triggered = true;
                 break;
             }
+            delay(10);
         }
-        // 3 saniyeden önce bırakılırsa iptal
-        if (millis() - t < 3000) {
+        if (triggered) {
+            oledShow("DB Resetting...", "1/2 Clearing finger");
+            Serial.println(F("\n>> RESET DATABASE"));
+            
+            // Step 1: Clear local fingerprint sensor database
+            uint8_t f_res = finger.emptyDatabase();
+            if (f_res == FINGERPRINT_OK) {
+                Serial.println(F("  [FINGER] Cleared fingerprint DB."));
+                oledShow("DB Resetting...", "2/2 Clearing face DB");
+            } else {
+                Serial.print(F("  [FINGER] emptyDatabase failed: ")); Serial.println(f_res);
+                Serial.println(F("  [FINGER] Attempting manual delete loop..."));
+                // Fallback: manually delete all possible template slots with OLED progress
+                for (int id = 1; id <= 127; id++) {
+                    char progressMsg[24];
+                    sprintf(progressMsg, "Deleting slot %d/127", id);
+                    oledShow("DB Resetting...", "1/2 Clearing finger", progressMsg);
+                    finger.deleteModel(id);
+                }
+                Serial.println(F("  [FINGER] Manual clear finished."));
+                oledShow("DB Resetting...", "2/2 Clearing face DB");
+            }
+            finger.getTemplateCount(); // Update template count to 0
+            delay(1000);
+
+            // Step 2: Clear remote face database on PC server via ESP32-CAM
+            if (requestFaceReset()) {
+                oledShow("DB Reset!", "Done.");
+                Serial.println(F("  [SYS] Database reset complete."));
+            } else {
+                oledShow("Reset Error!", "Face DB clear failed");
+                Serial.println(F("  [SYS] Face database reset failed."));
+            }
+            delay(2500);
+            showWelcome();
+        } else {
+            // Cancelled if released before 3s
             oledShow("Cancelled.");
             delay(1000);
             showWelcome();
@@ -290,13 +345,39 @@ FaceRegResult requestFaceRegister(int id) {
   return FREG_ERR;  // timeout
 }
 
+// Ask the ESP32-CAM to trigger a face database reset on the PC server.
+// Returns true on success, false on failure/cancel/timeout.
+bool requestFaceReset() {
+  while (CAM_SERIAL.available()) CAM_SERIAL.read();  // flush stale bytes
+  CAM_SERIAL.println("RESET_DB");
+  Serial.println(F("  [CAM] RESET_DB sent, waiting..."));
+
+  String resp = "";
+  unsigned long t0 = millis();
+  while (millis() - t0 < 15000) {  // 15 seconds timeout
+    if (digitalRead(BTN_CANCEL) == LOW) return false;
+    while (CAM_SERIAL.available()) {
+      char c = CAM_SERIAL.read();
+      if (c == '\n') {
+        resp.trim();
+        Serial.print(F("  [CAM] -> ")); Serial.println(resp);
+        if (resp == "RESET_OK") return true;
+        return false;
+      } else if (c != '\r') {
+        resp += c;
+      }
+    }
+  }
+  return false; // timeout
+}
+
 // ── LOGIN (face first, then fingerprint) ─────────────────────
 
 void searchFlow() {
   Serial.println(F("\n>> LOGIN"));
 
   // ── Factor 1: Face ──
-  oledShow("Step 1: Face", "Look at camera...", "(45:Cancel)");
+  oledShow("Step 1: Face", "Look at camera...", "(4:Cancel)");
   switch (requestFaceCheck()) {
     case FACE_OK:                                     break;  // continue
     case FACE_UNKNOWN: triggerAlarm("UNKNOWN FACE!"); return;
@@ -308,7 +389,7 @@ void searchFlow() {
   Serial.print(F("  Face matched user ID: ")); Serial.println(faceID);
 
   // ── Factor 2: Fingerprint (must be the SAME user id) ──
-  oledShow("Step 2: Finger", "Place finger on", "sensor... (45:Cancel)");
+  oledShow("Step 2: Finger", "Place finger on", "sensor... (4:Cancel)");
 
   if (!waitForFinger()) {
     returnToWelcome("Cancelled.");
@@ -354,7 +435,7 @@ void enrollFlow() {
   Serial.print(F("\n>> ENROLL — ID #")); Serial.println(id);
 
   // ── Step 1: Face registration via camera (same id) ──
-  oledShow("Register Face", "Look at camera...", "(45:Cancel)");
+  oledShow("Register Face", "Look at camera...", "(4:Cancel)");
   switch (requestFaceRegister(id)) {
     case FREG_OK:                                              break;  // continue
     case FREG_CANCEL: returnToWelcome("Cancelled.");           return;
@@ -366,7 +447,7 @@ void enrollFlow() {
 
   // ── Step 2: Fingerprint enrollment (same id) ──
   // 1st scan
-  oledShow("Register", "Place finger on", "sensor... (45:Cancel)");
+  oledShow("Register", "Place finger on", "sensor... (4:Cancel)");
   Serial.println(F("  Place finger (1st scan)..."));
 
   if (!waitForFinger()) {
@@ -387,7 +468,7 @@ void enrollFlow() {
   while (p != FINGERPRINT_NOFINGER) { p = finger.getImage(); }
 
   // 2nd scan
-  oledShow("Register", "Place same finger", "again... (45:Cancel)");
+  oledShow("Register", "Place same finger", "again... (4:Cancel)");
   Serial.println(F("  Place same finger (2nd scan)..."));
 
   if (!waitForFinger()) {
